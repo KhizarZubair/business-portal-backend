@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['user_id', 'state_hash', 'expires_at', 'used_at'])]
 class LinkedInOAuthState extends Model
 {
+    protected $table = 'linkedin_oauth_states';
+
     /**
      * @return array<string, string>
      */

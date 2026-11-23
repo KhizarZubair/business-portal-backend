@@ -62,7 +62,7 @@ class LinkedInOAuthController extends Controller
         }
     }
 
-    public function show(Request $request): JsonResponse
+    public function show(Request $request, LinkedInOAuthService $service): JsonResponse
     {
         $accounts = $request->user()
             ->connectedAccounts()
@@ -80,6 +80,7 @@ class LinkedInOAuthController extends Controller
                         && filled(config('services.linkedin.redirect_uri')),
                     'callback_url' => (string) config('services.linkedin.redirect_uri'),
                     'callback_uses_https' => str_starts_with((string) config('services.linkedin.redirect_uri'), 'https://'),
+                    'callback_allowed_for_environment' => $service->isCallbackUrlAllowedForCurrentEnvironment((string) config('services.linkedin.redirect_uri')),
                     'scopes' => config('services.linkedin.scopes', []),
                 ],
                 'capabilities' => [

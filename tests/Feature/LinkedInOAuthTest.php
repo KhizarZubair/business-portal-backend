@@ -18,11 +18,14 @@ class LinkedInOAuthTest extends TestCase
 
     public function test_oauth_redirect_uses_oidc_scopes_and_persists_only_a_hash_of_state(): void
     {
+        $redirectUri = 'https://portal.example.test/api/v1/integrations/linkedin/callback';
+
         config([
             'services.linkedin.client_id' => 'test-client-id',
             'services.linkedin.client_secret' => 'test-client-secret',
-            'services.linkedin.redirect_uri' => 'https://portal.example.test/api/v1/integrations/linkedin/callback',
+            'services.linkedin.redirect_uri' => $redirectUri,
             'services.linkedin.scopes' => ['openid', 'profile', 'email'],
+            'app.env' => 'production',
         ]);
 
         $user = User::factory()->create();
@@ -35,6 +38,7 @@ class LinkedInOAuthTest extends TestCase
         parse_str((string) parse_url($authorizationUrl, PHP_URL_QUERY), $query);
 
         $this->assertSame('test-client-id', $query['client_id']);
+        $this->assertSame($redirectUri, $query['redirect_uri']);
         $this->assertSame('openid profile email', $query['scope']);
         $this->assertDatabaseHas('linkedin_oauth_states', [
             'user_id' => $user->id,
@@ -47,10 +51,12 @@ class LinkedInOAuthTest extends TestCase
 
     public function test_callback_stores_linkedin_identity_and_encrypts_the_access_token(): void
     {
+        $redirectUri = 'https://portal.example.test/api/v1/integrations/linkedin/callback';
+
         config([
             'services.linkedin.client_id' => 'test-client-id',
             'services.linkedin.client_secret' => 'test-client-secret',
-            'services.linkedin.redirect_uri' => 'https://portal.example.test/api/v1/integrations/linkedin/callback',
+            'services.linkedin.redirect_uri' => $redirectUri,
             'services.linkedin.frontend_url' => 'http://localhost:5173',
             'services.linkedin.scopes' => ['openid', 'profile', 'email'],
         ]);
@@ -94,7 +100,8 @@ class LinkedInOAuthTest extends TestCase
         $this->assertSame('linkedin-secret-token', $account->access_token);
         $this->assertNotSame('linkedin-secret-token', DB::table('connected_accounts')->value('access_token'));
         $this->assertNotNull(LinkedInOAuthState::query()->firstOrFail()->used_at);
-        Http::assertSent(fn ($request): bool => $request->url() === 'https://www.linkedin.com/oauth/v2/accessToken');
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://www.linkedin.com/oauth/v2/accessToken'
+            && $request['redirect_uri'] === $redirectUri);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.linkedin.com/v2/userinfo' && $request->hasHeader('Authorization', 'Bearer linkedin-secret-token'));
     }
 
@@ -113,20 +120,62 @@ class LinkedInOAuthTest extends TestCase
             ->assertJsonPath('message', 'LinkedIn OAuth is not configured. Add the app credentials, callback URL and scopes to the backend environment.');
     }
 
-    public function test_oauth_redirect_rejects_an_http_callback_url(): void
+    public function test_oauth_redirect_allows_http_loopback_callback_urls_in_local_environment(): void
+    {
+        config([
+            'services.linkedin.client_id' => 'test-client-id',
+            'services.linkedin.client_secret' => 'test-client-secret',
+            'services.linkedin.scopes' => ['openid', 'profile', 'email'],
+            'app.env' => 'local',
+        ]);
+
+        Sanctum::actingAs(User::factory()->create());
+
+        foreach ([
+            'http://localhost:8000/api/v1/integrations/linkedin/callback',
+            'http://127.0.0.1:8000/api/v1/integrations/linkedin/callback',
+        ] as $redirectUri) {
+            config(['services.linkedin.redirect_uri' => $redirectUri]);
+
+            $response = $this->getJson('/api/v1/integrations/linkedin/redirect');
+            $response->assertOk();
+
+            parse_str((string) parse_url($response->json('data.authorization_url'), PHP_URL_QUERY), $query);
+            $this->assertSame($redirectUri, $query['redirect_uri']);
+        }
+    }
+
+    public function test_oauth_redirect_rejects_http_loopback_callback_urls_in_production(): void
     {
         config([
             'services.linkedin.client_id' => 'test-client-id',
             'services.linkedin.client_secret' => 'test-client-secret',
             'services.linkedin.redirect_uri' => 'http://localhost:8000/api/v1/integrations/linkedin/callback',
             'services.linkedin.scopes' => ['openid', 'profile', 'email'],
+            'app.env' => 'production',
         ]);
 
         Sanctum::actingAs(User::factory()->create());
 
         $this->getJson('/api/v1/integrations/linkedin/redirect')
             ->assertStatus(503)
-            ->assertJsonPath('message', 'LinkedIn OAuth requires a publicly reachable HTTPS callback URL. Register the same URL in the LinkedIn Developer Portal and backend environment.');
+            ->assertJsonPath('message', 'LinkedIn OAuth requires an HTTPS callback URL, except for localhost and 127.0.0.1 when APP_ENV=local. Register the exact callback URL in the LinkedIn Developer Portal and backend environment.');
+    }
+
+    public function test_oauth_redirect_rejects_non_loopback_http_callback_urls_in_local_environment(): void
+    {
+        config([
+            'services.linkedin.client_id' => 'test-client-id',
+            'services.linkedin.client_secret' => 'test-client-secret',
+            'services.linkedin.redirect_uri' => 'http://portal.example.test/api/v1/integrations/linkedin/callback',
+            'services.linkedin.scopes' => ['openid', 'profile', 'email'],
+            'app.env' => 'local',
+        ]);
+
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->getJson('/api/v1/integrations/linkedin/redirect')
+            ->assertStatus(503);
     }
 
     public function test_linkedin_status_exposes_setup_instructions_without_exposing_credentials(): void
@@ -136,6 +185,7 @@ class LinkedInOAuthTest extends TestCase
             'services.linkedin.client_secret' => null,
             'services.linkedin.redirect_uri' => 'http://localhost:8000/api/v1/integrations/linkedin/callback',
             'services.linkedin.scopes' => ['openid', 'profile', 'email'],
+            'app.env' => 'local',
         ]);
 
         Sanctum::actingAs(User::factory()->create());
@@ -145,6 +195,7 @@ class LinkedInOAuthTest extends TestCase
             ->assertJsonPath('data.setup.credentials_configured', false)
             ->assertJsonPath('data.setup.callback_url', 'http://localhost:8000/api/v1/integrations/linkedin/callback')
             ->assertJsonPath('data.setup.callback_uses_https', false)
+            ->assertJsonPath('data.setup.callback_allowed_for_environment', true)
             ->assertJsonPath('data.setup.scopes.0', 'openid')
             ->assertJsonMissingPath('data.setup.client_secret');
     }

@@ -24,8 +24,8 @@ class LinkedInOAuthService
             throw new RuntimeException('LinkedIn OAuth is not configured. Add the app credentials, callback URL and scopes to the backend environment.');
         }
 
-        if (! str_starts_with($redirectUri, 'https://')) {
-            throw new RuntimeException('LinkedIn OAuth requires a publicly reachable HTTPS callback URL. Register the same URL in the LinkedIn Developer Portal and backend environment.');
+        if (! $this->isCallbackUrlAllowedForCurrentEnvironment($redirectUri)) {
+            throw new RuntimeException('LinkedIn OAuth requires an HTTPS callback URL, except for localhost and 127.0.0.1 when APP_ENV=local. Register the exact callback URL in the LinkedIn Developer Portal and backend environment.');
         }
 
         $state = Str::random(64);
@@ -43,6 +43,30 @@ class LinkedInOAuthService
             'state' => $state,
             'scope' => implode(' ', $scopes),
         ], '', '&', PHP_QUERY_RFC3986);
+    }
+
+    public function isCallbackUrlAllowedForCurrentEnvironment(string $redirectUri): bool
+    {
+        $urlParts = parse_url($redirectUri);
+
+        if (
+            ! is_array($urlParts)
+            || ! isset($urlParts['scheme'], $urlParts['host'])
+            || isset($urlParts['user'])
+            || isset($urlParts['pass'])
+        ) {
+            return false;
+        }
+
+        $scheme = strtolower($urlParts['scheme']);
+
+        if ($scheme === 'https') {
+            return true;
+        }
+
+        return config('app.env') === 'local'
+            && $scheme === 'http'
+            && in_array(strtolower($urlParts['host']), ['localhost', '127.0.0.1'], true);
     }
 
     public function completeAuthorization(string $state, string $code): ConnectedAccount
