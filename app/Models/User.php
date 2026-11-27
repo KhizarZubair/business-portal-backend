@@ -36,4 +36,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(ConnectedAccount::class);
     }
+
+    /**
+     * @return HasMany<ScheduledPost, $this>
+     */
+    public function scheduledPosts(): HasMany
+    {
+        return $this->hasMany(ScheduledPost::class);
+    }
 }

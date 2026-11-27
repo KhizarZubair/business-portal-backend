@@ -71,6 +71,8 @@ class LinkedInOAuthController extends Controller
             ->latest()
             ->get();
 
+        $hasPublishingScope = in_array('w_member_social', (array) config('services.linkedin.scopes', []), true);
+
         return response()->json([
             'data' => [
                 'accounts' => ConnectedAccountResource::collection($accounts),
@@ -87,8 +89,10 @@ class LinkedInOAuthController extends Controller
                     'personal_member_profile' => true,
                     'company_pages' => false,
                     'company_pages_reason' => 'Company Page access requires LinkedIn organization permissions and API product approval. The current connection only requests OpenID Connect member permissions.',
-                    'publishing' => false,
-                    'publishing_reason' => 'Share on LinkedIn permission has not been configured for this connection.',
+                    'publishing' => $hasPublishingScope,
+                    'publishing_reason' => $hasPublishingScope
+                        ? 'Ready to publish and schedule posts via w_member_social.'
+                        : 'Share on LinkedIn permission (w_member_social) has not been configured for this connection.',
                 ],
             ],
         ]);

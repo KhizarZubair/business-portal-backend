@@ -41,6 +41,8 @@ return [
         'redirect_uri' => env('LINKEDIN_REDIRECT_URI', env('APP_URL', 'http://localhost:8000').'/api/v1/integrations/linkedin/callback'),
         'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
         'scopes' => array_values(array_filter(array_map('trim', explode(',', env('LINKEDIN_SCOPES', 'openid,profile,email'))))),
+        'api_version' => env('LINKEDIN_API_VERSION', '202605'),
+        'posts_endpoint' => env('LINKEDIN_POSTS_ENDPOINT', 'https://api.linkedin.com/rest/posts'),
     ],
 
 ];
